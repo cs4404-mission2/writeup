@@ -4,13 +4,24 @@ Jake Ellington and Nate Sales
 # Reconnaissance
 ## SMS
 
+SMS 2FA is typically implemented where a provider sends a numerical pin over SMS to a user's device. Like other 2FA designs, the goal of SMS is to provide another layer of authentication for a user.
+
+The most significant problem with this design is that SMS isn't encrypted in transport. An on-path adversary is able to intercept the pin over the air or over the telco's backend infrastructure, typically involving a routing protocol like SS7 [1].
+
+An alternate means of compromise is SIM swapping - where an attacker convinces the phone company to reroute a victim's texts and calls to a phone under the attacker's control [2].
+
+[1] https://usa.kaspersky.com/blog/ss7-hacked/17099/
+
+[2] https://blog.mozilla.org/en/internet-culture/mozilla-explains/mozilla-explains-sim-swapping/
+
+
 ## FIDO
 FIDO2 is an authentication mechanism that uses asymmetric key signing. When a FIDO2 device is added as an MFA method to a website, the website stores the device's public key. Subsequently when the user logs in, the website sends a challenge to the device, which signs the challenge with its private key and sends the signed message back to be verified with the public key. 
 
 The security goal of this factor is authenticity. It proves that the person attempting to access the account has a FIDO2 device with a private key that corresponds to the public key that the server knows. This method assumes that the server generates unique challenges, that the FIDO2 key does not divulge its private key, and that the hardware token can be trusted.
 
 ### Failures
-A notable failure of a FIDO2 device was the audit of the NirtoKey FIDO usb token including the disclosure of CVE-2020-12061 which scored 9.8. 
+A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token including the disclosure of CVE-2020-12061 which scored 9.8. 
 
 
 ## Telephone
