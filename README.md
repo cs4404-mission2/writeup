@@ -77,6 +77,7 @@ def manipulate(self, pkt: Packet):
         pkt.lastlayer().add_payload(content)
         return pkt
 ```
+*Note: The `txbuff` referenced above is a buffer of 0.25 seconds of the DTMF "#" code audio*
 
 # Defense
 ## VOIP
