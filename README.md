@@ -80,10 +80,7 @@ def manipulate(self, pkt: Packet):
 *Note: The `txbuff` referenced above is a buffer of 0.25 seconds of the DTMF "#" code audio*
 
 # Defense
-## VOIP
-* Timing analysis of manipulated packets 
-  * The Manipulation is fast but when each RTP packet is only 20ms long, it adds up
-* vary what you require the user to press
-  * Webserver shows what it wants the user to enter but does NOT send it as part of the in-browser request
-  * VOIP server sends string of all DTMF codes entered, webserver checks if it was right
-  
+## Telephony
+There are a number of defenses which would add complexity to the attack and make it harder to compromise, however none of them could truly prevent an attack of this nature. For example, one defense we implemented was that, rather than the user just pressing pound, display a code on the website that they must enter into the phone, (this could also be done the other way around). While this would require more complexity on the part of the man in the middle software, the attacker still has access to the website and the phone call so they can still forge authentication. In fact, a system where a code is read over the phone and entered on the website only requires the attacker to be on-path rather than in-path. Due to the nature of telephony, automated calls will never be an infallible second factor. A low skill attacker can just steal the phone as most phones allow a user to answer a call without unlocking the device by default. A mid-tier attacker could social engineer a telco employee and SIM swap. A hypothetical state actor such as the Not-real Shueworld Adversary (NSA for short) may already have equipment in-path in collaboration with the service provider. Due to these factors and the lack of cryptography by default, this method is simply too insecure against a motivated, targeted adversary.
+
+While the best defense is to prevent an attacker from getting on-path via BGP security, this cannot be done by a website and must be done by service providers. What websites could do is offer better authentication methods such as TOTP and FIDO2. And, critically, not allow telephony as a fallback if the user cannot authenticate by the more secure means. A chain is only as strong as its weakest link. 
