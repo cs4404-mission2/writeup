@@ -89,13 +89,26 @@ We then install build dependencies with `sudo contrib/scripts/install_prereq ins
 
 #### Configure Asterisk
 
-The core of Asterisk's call routing engine is it's dialplan. The dialplan defines how calls are routed to and from the PBX. (By default, all internal extension can call eachother.) We create the `/etc/asterisk/extensions.conf` dialplan config file and add a simple test extension that reads the caller ID (the extension number in the case of an internal extension):
+The core of Asterisk's call routing engine is it's dialplan. The dialplan defines how calls are routed to and from the PBX. We create the `/etc/asterisk/extensions.conf` dialplan config file and add our call routing logic:
 
 ```
+; The outbound call context defines an entrypoint to a list of call routes
 [outbound]
+
+; Extension 100 doesn't exist as a phone anywhere - instead, it reads back the number you're calling from
 exten = 100,1,Answer()
-	same = n,Playback(call-from)
 	same = n,SayDigits(${CALLERID(num)})
+	same = n,Hangup()
+
+; Route extensions 10, 20, and 30 to their respective PJSIP endpoints
+exten = 10,1,NoOp()
+	same = n,Dial(PJSIP/10,60)
+	same = n,Hangup()
+exten = 20,1,NoOp()
+	same = n,Dial(PJSIP/20,60)
+	same = n,Hangup()
+exten = 30,1,NoOp()
+	same = n,Dial(PJSIP/30,60)
 	same = n,Hangup()
 ```
 
@@ -360,17 +373,47 @@ Endpoint = 192.168.0.17:51820
 
 And bring the interface up with `sudo systemctl enable --now wg-quick@wg0`
 
+# Attack
+## Reconnaissance
+
+### Webserver
+The first step in exploiting a web service is to explore the developer tools while interacting with it. We first logged in as normal and analyzed the authentication cookie it gave us. We noticed that it changed when we successfully authenticated with MFA but that the cookie value was completely different across different sessions for the same user, so a replay would not be possible. This is due to the server's use of NONCE values when encrypting and signing the cookies.
+
+Not being able to attack cookies, we looked at the network section of the developer tools and noticed that in most cases, the website only made a single GET or POST to the webserver, as expected. However, during two factor authentication, it makes another GET to an external resource before the content is loaded. This GET turned out to be a goldmine as it gave us two critical pieces of information: the first was that authentication is handled by the server at the address `REPLACEME`. The second piece of information was that this GET leaked the full phone number of the user. As shown in the figure below, the webpage usually censors the phone number in the format `(***)-***-XXXX`, however the GET contained the full phone number of the user for 2FA. Now we know both the client and server responsible for the authentication process.
+
+### VOIP
+
+The next step was to see how SIP and RTP packets were handled on the network. To do this, we logged in as a legitimate user and installed scapy and a softphone on a laptop on the network. We then initiated the authentication process and used the `sniff()` function to capture the traffic. Sample RTP and SIP packets are shown below:
+
+```python
+RTP:
+<Ether  dst=e2:08:0d:bf:31:82 src=72:fe:16:95:d3:0e type=IPv4 |<IP  version=4 ihl=5 tos=0x0 len=120 id=9903 flags=DF frag=0 ttl=51 proto=udp chksum=0x5769 src=130.215.126.203 dst=XX.XX.XX.XX |<UDP  sport=49094 dport=13418 len=100 chksum=0x3ccc |<Raw  load='\x80\x00\x0b%G\xc0V\x1d%C\xe0\xb0\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb2\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb2\xb2\xb2\xb2\xb2\xb2\xb1\xb2' |>>>>
+```
+
+```python
+SIP:
+<Ether  dst=e2:08:0d:bf:31:82 src=72:fe:16:95:d3:0e type=IPv4 |<IP  version=4 ihl=5 tos=0x0 len=592 id=19185 flags=DF frag=0 ttl=35 proto=udp chksum=0x6c34 src=20.203.193.242 dst=XX.XX.XX.XX |<UDP  sport=5155 dport=sip len=572 chksum=0x5698 |<Raw  load='REGISTER sip:XX.XX.XX.XX SIP/2.0\r\nVia: SIP/2.0/UDP 10.5.0.4:5155;branch=z9hG4bK-3073724805;rport\r\nContent-Length: 0\r\nFrom: "2222" <sip:2222@XX.XX.XX.XX>;tag=323232323a436c61726f4e4f4301333936383734323032\r\nAccept: application/sdp\r\nUser-Agent: FPBX\r\nTo: "2222" <sip:2222@XX.XX.XX.XX>\r\nContact: sip:XXX@XX.XX.XX.XX\r\nCSeq: 2 REGISTER\r\nCall-ID: XXXXXXXX\r\nMax-Forwards: 70\r\nAuthorization: Digest username="XXXX",realm="asterisk",nonce="XXXX",uri="sip:XX.XX.XX.XX",response="bf06c829a2b5cbb9ec797be8ff4ce046",algorithm=MD5\r\n\r\n' |>>>>
+```
+
+Sensitive data such as some IP addresses have been replaced with `XX`. 
+
+Both communication types are identified as a raw UDP payload, however they are easily differentiable due to the different ports used and the fact that the RTP data is raw bytes. 
+
+## Setting up virtual interfaces
+todo: talk about adding another nic on a vlan for communications with the pbx
+
+## BGP Hijack
+
 ### Attack Setup
 
-```
-sudo apt install -y bird2
-```
+In order to become on-path, we established BGP sessions to the VoIP network and ISP gateway. Our infrastructure simulates an Internet Exchange where providers would peer with other organizations in order to exchange routing information between their networks. 
 
-
+We install BIRD on our attacker VM with `sudo apt install -y bird2` and create a config file at `/etc/bird/bird.conf`:
 
 ```
 router id 192.168.0.18;
 
+# Our goal is to have bidirectional control over the traffic between the VoIP and ISP networks, so we need to hijack both directions 
 protocol static static4 {
   ipv4;
   route 192.0.2.0/24 reject;
@@ -422,37 +465,6 @@ protocol bgp AS65530 {
   };
 }
 ```
-
-
-
-# Attack
-## Reconnaissance
-
-### Webserver
-The first step in exploiting a web service is to explore the developer tools while interacting with it. We first logged in as normal and analyzed the authentication cookie it gave us. We noticed that it changed when we successfully authenticated with MFA but that the cookie value was completely different across different sessions for the same user, so a replay would not be possible. This is due to the server's use of NONCE values when encrypting and signing the cookies.
-
-Not being able to attack cookies, we looked at the network section of the developer tools and noticed that in most cases, the website only made a single GET or POST to the webserver, as expected. However, during two factor authentication, it makes another GET to an external resource before the content is loaded. This GET turned out to be a goldmine as it gave us two critical pieces of information: the first was that authentication is handled by the server at the address `REPLACEME`. The second piece of information was that this GET leaked the full phone number of the user. As shown in the figure below, the webpage usually censors the phone number in the format `(***)-***-XXXX`, however the GET contained the full phone number of the user for 2FA. Now we know both the client and server responsible for the authentication process.
-
-### VOIP
-
-The next step was to see how SIP and RTP packets were handled on the network. To do this, we logged in as a legitimate user and installed scapy and a softphone on a laptop on the network. We then initiated the authentication process and used the `sniff()` function to capture the traffic. Sample RTP and SIP packets are shown below:
-
-```python
-RTP:
-<Ether  dst=e2:08:0d:bf:31:82 src=72:fe:16:95:d3:0e type=IPv4 |<IP  version=4 ihl=5 tos=0x0 len=120 id=9903 flags=DF frag=0 ttl=51 proto=udp chksum=0x5769 src=130.215.126.203 dst=XX.XX.XX.XX |<UDP  sport=49094 dport=13418 len=100 chksum=0x3ccc |<Raw  load='\x80\x00\x0b%G\xc0V\x1d%C\xe0\xb0\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb2\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb2\xb1\xb1\xb1\xb1\xb1\xb1\xb1\xb2\xb2\xb2\xb2\xb2\xb2\xb1\xb2' |>>>>
-```
-
-```python
-SIP:
-<Ether  dst=e2:08:0d:bf:31:82 src=72:fe:16:95:d3:0e type=IPv4 |<IP  version=4 ihl=5 tos=0x0 len=592 id=19185 flags=DF frag=0 ttl=35 proto=udp chksum=0x6c34 src=20.203.193.242 dst=XX.XX.XX.XX |<UDP  sport=5155 dport=sip len=572 chksum=0x5698 |<Raw  load='REGISTER sip:XX.XX.XX.XX SIP/2.0\r\nVia: SIP/2.0/UDP 10.5.0.4:5155;branch=z9hG4bK-3073724805;rport\r\nContent-Length: 0\r\nFrom: "2222" <sip:2222@XX.XX.XX.XX>;tag=323232323a436c61726f4e4f4301333936383734323032\r\nAccept: application/sdp\r\nUser-Agent: FPBX\r\nTo: "2222" <sip:2222@XX.XX.XX.XX>\r\nContact: sip:XXX@XX.XX.XX.XX\r\nCSeq: 2 REGISTER\r\nCall-ID: XXXXXXXX\r\nMax-Forwards: 70\r\nAuthorization: Digest username="XXXX",realm="asterisk",nonce="XXXX",uri="sip:XX.XX.XX.XX",response="bf06c829a2b5cbb9ec797be8ff4ce046",algorithm=MD5\r\n\r\n' |>>>>
-```
-
-Sensitive data such as some IP addresses have been replaced with `XX`. 
-
-Both communication types are identified as a raw UDP payload, however they are easily differentiable due to the different ports used and the fact that the RTP data is raw bytes. 
-
-## Setting up virtual interfaces
-todo: talk about adding another nic on a vlan for communications with the pbx
 
 ## Admiral Crunch
 Now that BGP manipulation has put us in-path between the authentication system's PBX and the target's phone, we have to actually manipulate the pertinent traffic to allow the login without being detected. To sniff and manipulate traffic, we are using Scapy which is a CLI utility and python library that allows for packet capture and generation. To capture packets, we use Scapy's `bridge_and_sniff` function which allows us to forward traffic from one interface to the other while inspecting and tampering with any traffic flowing through. In our configuration, `enp5s0` was facing the PBX and `enp5s1` was facing outward. This is set up in the second to last line in the program: 
