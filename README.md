@@ -4,24 +4,40 @@ Jake Ellington and Nate Sales
 # Reconnaissance
 ## SMS
 
-SMS 2FA is typically implemented where a provider sends a numerical pin over SMS to a user's device. Like other 2FA designs, the goal of SMS is to provide another layer of authentication for a user.
+### Overview
+
+SMS 2FA is typically implemented where a provider sends a randomly generated, short lived numerical pin over SMS to a user's device. The user then enters this code into the website to prove that they are in possession of the cellular device. Like other 2FA designs, the goal of SMS is to provide another layer of authentication for a user.
+
+### Failures
 
 The most significant problem with this design is that SMS isn't encrypted in transport. An on-path adversary is able to intercept the pin over the air or over the telco's backend infrastructure, typically involving a routing protocol like SS7 [1].
 
-An alternate means of compromise is SIM swapping - where an attacker convinces the phone company to reroute a victim's texts and calls to a phone under the attacker's control [2].
+An alternate means of compromise is SIM swapping - where an attacker convinces the phone company to reroute a victim's texts and calls to a phone under the attacker's control [2]. SIM swapping is not just a hypothetical attack but has been used recently in major cryptocurrency thefts such as the theft of $24 Million in bitcoin [3]. This attack involves re-assigning a phone number from one SIM card to another. This can be done either by social engineering telco employees, bribing them, or simply stealing the tablet out of the hands of a telco store manager. This is a significant issue as the attack is relatively low skill and is a vulnerability at the transport level. The flaws with SMS 2FA cannot be addressed by the authenticating party other than simply not using it.
+
+### Successes
+
+The primary advantage to SMS 2FA is that it "just works."  Other authentication mechanisms require a user to install an application on their smart phone which may be incompatible or require the user to purchase a hardware token which can be cost-prohibitive, especially at scale. However, SMS is an old, well tested, and extremely widespread protocol. No matter what hardware you have, SMS will probably work and is not difficult for technically illiterate users to set up. In this sense, SMS is successful because it is still much better than nothing. Security practices are only effective if people actually use them after all. SMS does also have the advantage that an attack consisting of simply bombarding the user with authentication requests is less likely to work as the right code must be matched with the right request.
 
 [1] https://usa.kaspersky.com/blog/ss7-hacked/17099/
 
 [2] https://blog.mozilla.org/en/internet-culture/mozilla-explains/mozilla-explains-sim-swapping/
 
+[3] https://markets.businessinsider.com/currencies/news/bitcoin-investor-loses-24-million-of-crypto-sim-swap-hackers-2019-11-1028677818
 
 ## FIDO
+
+### Overview
+
 FIDO2 is an authentication mechanism that uses asymmetric key signing. When a FIDO2 device is added as an MFA method to a website, the website stores the device's public key. Subsequently when the user logs in, the website sends a challenge to the device, which signs the challenge with its private key and sends the signed message back to be verified with the public key. 
 
 The security goal of this factor is authenticity. It proves that the person attempting to access the account has a FIDO2 device with a private key that corresponds to the public key that the server knows. This method assumes that the server generates unique challenges, that the FIDO2 key does not divulge its private key, and that the hardware token can be trusted.
 
 ### Failures
-A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token including the disclosure of CVE-2020-12061 which scored 9.8. 
+A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token including the disclosure of CVE-2020-12061 which scored 9.8. This CVE was one of many issues discovered in a security assessment by cure53. This included hardware flaws such as oboard components communicating in the plane allowing an attacker to steal any secrets stored in the device and manipulate its firmware if they had physical access. Of course this is not an attack that can be done easily or on a large scale, but running arbitrary code on a security device is a major issue. Additionally, the firmware had other issues that allowed an attacker to bypass password protection to generate OTP codes. Additionally, the microcontroller's security bit was unset by default, allowing an attacker to overwrite program code on the device. These exploits would allow an attacker to use the device to generate authentication codes without user approval or steal the FIDO2 private key and effectivley make a clone of the device. 
+
+### Successes
+
+While the NitroKey failures do significantly decrease security against a targeted, high skill attacker, it was still secure to the vast majority of attacks. An attacker would need either physical access to the key or remove access to the user's computer with the key connected. The far more likely threat vector of mass credential stuffing from a remote attacker would not be able to access the account as the FIDO2 protocol was not broken, only the physical hardware had issues. Other hardware tokens like the YubiKey have seen widespread usage and success.
 
 
 ## Telephone
