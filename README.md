@@ -12,7 +12,7 @@ SMS 2FA is typically implemented where a provider sends a randomly generated, sh
 
 The most significant problem with this design is that SMS isn't encrypted in transport. An on-path adversary is able to intercept the pin over the air or over the telco's backend infrastructure, typically involving a routing protocol like SS7 [1].
 
-An alternate means of compromise is SIM swapping - where an attacker convinces the phone company to reroute a victim's texts and calls to a phone under the attacker's control [2]. SIM swapping is not just a hypothetical attack but has been used recently in major cryptocurrency thefts such as the theft of $24 Million in bitcoin [3]. This attack involves re-assigning a phone number from one SIM card to another. This can be done either by social engineering telco employees, bribing them, or simply stealing the tablet out of the hands of a telco store manager. This is a significant issue as the attack is relatively low skill and is a vulnerability at the transport level. The flaws with SMS 2FA cannot be addressed by the authenticating party other than simply not using it.
+An alternate means of compromise is SIM swapping - where an attacker convinces the phone company to reroute a victim's texts and calls to a phone under the attacker's control [2]. SIM swapping is not just a hypothetical attack but has been used recently in major cryptocurrency thefts such as the theft of $24 Million in bitcoin [3]. This attack involves re-assigning a phone number from one SIM card to another. This can be done either by social engineering telco employees, bribing them, or simply stealing the tablet out of the hands of a telco store manager. This is a significant issue as the attack is relatively low skill and is a vulnerability at the transport level. The flaws with SMS 2FA cannot be addressed by the authenticating party other than simply not using it. These transport-level vulnerabilities also apply to telephony-based authentication systems.
 
 ### Successes
 
@@ -39,8 +39,21 @@ A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token
 
 While the NitroKey failures do significantly decrease security against a targeted, high skill attacker, it was still secure to the vast majority of attacks. An attacker would need either physical access to the key or remove access to the user's computer with the key connected. The far more likely threat vector of mass credential stuffing from a remote attacker would not be able to access the account as the FIDO2 protocol was not broken, only the physical hardware had issues. Other hardware tokens like the YubiKey have seen widespread usage and success.
 
+## Prompt Authentication
 
-## Telephone
+### Overview
+
+Multiple providers, namely Google and Microsoft, offer app-based authentication. When a user logs in to an untrusted device, they are prompted to "tap yes on {PHONE NAME} to approve sign in." When the user presses yes in the app, it communicates with the provider's servers and allows the sign in. Google has a variant of this system which displays a number on the machine trying to log in and several numbers on the authenticating phone. The user must tap the correct number to allow the sign in. 
+
+### Failures
+
+One issue with this system is that of availability. Unlike TOTP based authentication apps, prompt-based apps require the user's phone to have a stable network connection. Additionally unlike SMS, they require that the user's phone be running an up to date mainstream mobile operating system (Android or iOS). This raises issues of availability and convenience which may drive users to simply turn 2FA off. 
+
+The major issue with prompt based authentication, specifically the Yes/No variant, is prompt spamming. This is when an attacker sends repeated requests for authentication to a user's device and hopes that one of the times they slip up and accidentally approve the request. Notably, this was used to compromise some Twitter employee accounts in 2020. 
+
+### Successes
+
+While prompt spamming is an issue for prompt authentication, there are already mitigations for this attack such as Google's number-based prompt. Additionally, these prompts are often secured by the phone's on-board security such as Face ID authentication to approve Microsoft Authenticator requests, whereas SMS or phone calls can often be read when the device is locked. Finally, this system is not vulnerable to the transport vulnerabilities plaguing SMS and telephony as all communications between the app and server are TLS encrypted. This authentication method offers ease of use for most users, no cost overhead, and better security than SMS not including human error. 
 
 # Infrastructure
 The infrastructure for this project consists of a web server, an automated VOIP system that dials users and prompts for authentication, and corresponding VOIP infrastructure to allow the calls to be placed.
