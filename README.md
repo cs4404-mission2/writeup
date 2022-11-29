@@ -36,8 +36,7 @@ The security goal of this factor is authenticity. It proves that the person atte
 
 ### Failures
 
-A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token including the disclosure of CVE-2020-12061 which scored 9.8. This CVE was one of many issues discovered in a security assessment by cure53. This included hardware flaws such as oboard components communicating in the plane allowing an attacker to steal any secrets stored in the device and manipulate its firmware if they had physical access. Of course this is not an attack that can be done easily or on a large scale, but running arbitrary code on a security device is a major issue. Additionally, the firmware had other issues that allowed an attacker to bypass password protection to generate OTP codes. Additionally, the microcontroller's security bit was unset by default, allowing an attacker to overwrite program code on the device. These exploits would allow an attacker to use the device to generate authentication codes without user approval or steal the FIDO2 private key and effectivley make a clone of the
-device.
+A notable failure of a FIDO2 device was the audit of the NitroKey FIDO USB token including the disclosure of CVE-2020-12061 which scored 9.8. This CVE was one of many issues discovered in a security assessment by cure53. This included hardware flaws such as oboard components communicating in the plane allowing an attacker to steal any secrets stored in the device and manipulate its firmware if they had physical access. Of course this is not an attack that can be done easily or on a large scale, but running arbitrary code on a security device is a major issue. Additionally, the firmware had other issues that allowed an attacker to bypass password protection to generate OTP codes. Additionally, the microcontroller's security bit was unset by default, allowing an attacker to overwrite program code on the device. These exploits would allow an attacker to use the device to generate authentication codes without user approval or steal the FIDO2 private key and effectivley make a clone of the device.
 
 ### Successes
 
@@ -155,37 +154,7 @@ username=10
 type=aor
 max_contacts=5
 
-[20]
-type=endpoint
-context=outbound
-disallow=all
-allow=ulaw
-auth=20
-aors=20
-[20]
-type=auth
-auth_type=userpass
-password=a78674e839d4
-username=20
-[20]
-type=aor
-max_contacts=5
-
-[30]
-type=endpoint
-context=outbound
-disallow=all
-allow=ulaw
-auth=30
-aors=30
-[30]
-type=auth
-auth_type=userpass
-password=a78674e839d4
-username=30
-[30]
-type=aor
-max_contacts=5
+<repeated for extensions 20 and 30>
 ```
 
 Here we define a UDP transport binding to 192.0.2.1 (an IP within the covering /24 announced via BGP) and 3 internal extensions: 10, 20 and 30. Each extension includes 3 configuration stanzas:
@@ -420,9 +389,7 @@ Sensitive data such as some IP addresses have been replaced with `XX`.
 
 Both communication types are identified as a raw UDP payload, however they are easily differentiable due to the different ports used and the fact that the RTP data is raw bytes.
 
-## Setting up virtual interfaces
 
-todo: talk about adding another nic on a vlan for communications with the pbx
 
 ## BGP Hijack
 
