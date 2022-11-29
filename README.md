@@ -137,7 +137,7 @@ Asterisk uses a modular approach for it's program structure. It's old SIP stack,
 [transport-udp]
 type = transport
 protocol = udp
-bind = 0.0.0.0
+bind = 192.0.2.1
 
 [10]
 type=endpoint
@@ -188,7 +188,7 @@ type=aor
 max_contacts=5
 ```
 
-Here we define a UDP transport and 3 internal extensions: 10, 20 and 30. Each extension includes 3 configuration stanzas:
+Here we define a UDP transport binding to 192.0.2.1 (an IP within the covering /24 announced via BGP) and 3 internal extensions: 10, 20 and 30. Each extension includes 3 configuration stanzas:
 
 - `[aor]`: Address On Record, which defines how many addresses should be allowed to send a SIP `REGISTER` packet to identify a UE (User Equipment, in our case a softphone)
 - `[auth]`: Simple username/password authentication
@@ -279,7 +279,7 @@ The ISP gateway is a VM that represents a simple Internet Service Provider. It p
 
 #### Install and configure BGP on the ISP gateway
 
-We begin by installing BIRD with `sudo apt install -y bird2`, then modifying it's config in `/etc/bird/bird.conf`:
+We begin by installing BIRD with `sudo apt install -y bird2`, then modifying its config in `/etc/bird/bird.conf`:
 
 ```
 router id 192.168.0.17;
@@ -560,7 +560,14 @@ Table master4:
 	BGP.local_pref: 100
 ```
 
+By this point, these routes have entered the kernel routing table and influence real traffic between the networks. Running a traceroute from the ISP gateway to the PBX shows we now have a suspicious extra hop (the attacker machine):
 
+```bash
+gateway:~# traceroute 192.0.2.1
+traceroute to 192.0.2.1 (192.0.2.1), 30 hops max, 60 byte packets
+ 1  192.168.0.18 (192.168.0.18)  0.313 ms  0.252 ms  0.227 ms
+ 2  192.0.2.1 (192.0.2.1)  0.275 ms  0.311 ms  0.299 ms
+```
 
 ## Admiral Crunch
 
@@ -624,7 +631,7 @@ Peerlock is a BGP security measure that combines AS path validation with peering
 
 ### Pathvector
 
-Pathvector is an open source routing automation stack that I created to reduce the level of manual configuration needed on Internet-facing routers. The majority of BGP hijacks could better be described as "route leaks", or accidental misconfigurations, so Pathvector's 
+Pathvector is an open source routing automation stack that I created to reduce the level of manual configuration needed on Internet-facing routers. The majority of BGP hijacks could better be described as "route leaks", or accidental misconfigurations, so Pathvector's primary use case for network operators is mitigating unintentional route leaks and configuration mistakes. However, many mistakes could be exploited maliciously as an attack, so Pathvector is an effective tool for BGP security until cryptographic standards like BGPsec and ASPA via RPKI are implemented.
 
 #### Install Pathvector
 
@@ -670,10 +677,10 @@ peers:
       - 192.168.0.18
 ```
 
-Finally, we instruct Pathvector to update it's running configuration with `pathvector gen`. A
+Finally, we instruct Pathvector to update it's running configuration with `pathvector gen`.
 
 ```bash
-root@gateway:~# pathvector gen
+gateway:~# pathvector gen
 INFO[0000] Starting Pathvector 6.0.2                    
 INFO[0000] BIRD config validation passed                
 INFO[0000] Reconfiguring BIRD                           
@@ -682,10 +689,20 @@ INFO[0000] BIRD response (multiline): 0004 Reconfiguration in progress
 INFO[0000] Processed 2 peers in 0s
 ```
 
-At this point, Pathvector is applying peerlock filters and "locking in" on the valid path to the VoIP network:
+At this point, Pathvector is applying peerlock filters and has "locked in" on the valid path to the VoIP network:
 
 ```bash
 gateway:~# traceroute 192.0.2.1
 traceroute to 192.0.2.1 (192.0.2.1), 30 hops max, 60 byte packets
  1  192.0.2.1 (192.0.2.1)  0.433 ms * *
 ```
+
+### Appendix
+
+There are a few promising BGP security measures that are currently being standardized in the IETF. They all have the primary security goal of authenticity: proving that data wasn't forged by an adversary.
+
+BGPsec, an effort to add cryptographic signatures to BGP UPDATE messages, is one of the original proposals but relies on unsigned transitive attributes such as the AS path. This is dangerous because it gives a false sense of security. BGP UPDATE messages are a good start, but as demonstrated in our attack, modifying the AS path is all an attacker needs to become on-path.
+
+Autonomous System Provider Authorization (ASPA) is a category of security practices that involve validating the AS path. Peerlock is one, but not the only means of ASPA. The IETF has been working on `draft-ietf-sidrops-aspa-verification`; a brand new proposal (introduced October 2022) that extends the RPKI (Resource Public Key Infrastructure) to include additional object types for ASPA.
+
+Neither BGPsec or ASPA are ready for deployment yet but represent a promising start to BGP security. Until then, Pathvector and Peerlock are here to stay.
