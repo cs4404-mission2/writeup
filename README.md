@@ -627,7 +627,7 @@ Even so, there are methods that are highly effective against BGP hijacks when pr
 
 ### Peerlock
 
-Peerlock is a BGP security measure that combines AS path validation with peering agreements to form a robust but unscalable solution to BGP hijacking. Peerlock begins when two ISPs are establishing BGP sessions to exchange their prefixes. They agree on certain path permutations that are expected (an allowlist) or paths that should never be seen on that session (a blocklist).
+Peerlock is a BGP security measure that combines AS path validation with peering agreements to form a robust but manual solution to BGP hijacking. Peerlock begins when two ISPs are establishing BGP sessions to exchange their prefixes. They agree on certain path permutations that are expected (an allowlist) or paths that should never be seen on that session (a blocklist).
 
 ### Pathvector
 
@@ -677,7 +677,7 @@ peers:
       - 192.168.0.18
 ```
 
-Finally, we instruct Pathvector to update it's running configuration with `pathvector gen`.
+Finally, we instruct Pathvector to update its running configuration with `pathvector gen`.
 
 ```bash
 gateway:~# pathvector gen
@@ -705,4 +705,4 @@ BGPsec, an effort to add cryptographic signatures to BGP UPDATE messages, is one
 
 Autonomous System Provider Authorization (ASPA) is a category of security practices that involve validating the AS path. Peerlock is one, but not the only means of ASPA. The IETF has been working on `draft-ietf-sidrops-aspa-verification`; a brand new proposal (introduced October 2022) that extends the RPKI (Resource Public Key Infrastructure) to include additional object types for ASPA.
 
-Neither BGPsec or ASPA are ready for deployment yet but represent a promising start to BGP security. Until then, Pathvector and Peerlock are here to stay.
+Neither BGPsec or ASPA are ready for deployment yet but represent a promising start to BGP security. Until then, Pathvector and Peerlock provide an effective solution for these attacks.
